@@ -1,0 +1,51 @@
+Appended file:
+
+[33mcommit 59d8a3285c61f3dc890b4b930c31cb2b320144ac[m
+Merge: 20025a3 c7ed3d9
+Author: Ashok kumar <c.asshokkumar@gmail.com>
+Date:   Sun Feb 19 13:05:37 2017 +0800
+
+    Merge branch 'BranchFromBase'
+
+[33mcommit c7ed3d9cbd0220885714800fab4a503612f92a3b[m
+Author: Ashok kumar <c.asshokkumar@gmail.com>
+Date:   Sun Feb 19 13:00:01 2017 +0800
+
+    Adding to Local Repository
+
+[33mcommit 20025a377422d38c4ec23a13056cd1b2bb8edf0d[m
+Merge: ea065e8 ac07f13
+Author: Ashok kumar <c.asshokkumar@gmail.com>
+Date:   Sun Feb 19 12:54:20 2017 +0800
+
+    Merge remote-tracking branch 'refs/remotes/origin/Branch1'
+
+[33mcommit ac07f13ab68fec703fea9057910079c04bee2883[m
+Author: Ashok kumar <c.asshokkumar@gmail.com>
+Date:   Sun Feb 19 12:51:18 2017 +0800
+
+    Version 3
+    
+    Version 3
+
+[33mcommit ea065e8b74399b4bca59fd324d6f63843a757db7[m
+Author: Ashok kumar <c.asshokkumar@gmail.com>
+Date:   Sun Feb 19 12:48:48 2017 +0800
+
+    V2
+    
+    Added v2
+
+[33mcommit 98d67857e082ef7fb2bd50db6448cfedc3cf28b9[m
+Author: Ashok kumar <c.asshokkumar@gmail.com>
+Date:   Sun Feb 19 12:47:59 2017 +0800
+
+    Version 1
+    
+    File 1 Version 1
+
+[33mcommit 5d768fb1b562ca9c2ada0895444d2eb523bc191f[m
+Author: Ashok kumar <c.asshokkumar@gmail.com>
+Date:   Sun Feb 19 12:45:01 2017 +0800
+
+    :octocat: Added .gitattributes & .gitignore files

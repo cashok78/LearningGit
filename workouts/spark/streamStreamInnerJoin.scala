@@ -24,7 +24,7 @@ object streamStreamInnerJoin extends App {
 
   val df = spark.readStream
     .format("rate")
-    .option("rowsPerSecond", 1)
+    .option("rowsPerSecond", 3)
     .option("numPartitions", 1)
     .option("rampUpTime", 1)
     .option("includeTimestamp", value = true)
@@ -35,28 +35,33 @@ object streamStreamInnerJoin extends App {
   val tickers = Seq("0011.HK","0000.HK","0055.HK","2111.HK","2323.HK","1167.HK","0700.HK")
   val udfFn = udf{value:Int => tickers(value %7)}
   val rateData = df.as[RateData]
-  val employeeDS = rateData.where("value % 10 != 0")
-    .withColumn("firstName",  concat(lit("firstName"),rateData.col("value")))
+  var quoteDs = rateData.where("value % 10 < 5")
+    .withColumn("quoteType",  concat(lit("quoteType "),rateData.col("value")))
     //.withColumn("lastName",  concat(lit("lastName"),rateData.col("value")))
     //.withColumn("e_deptId", lit(floor(rateData.col("value")/10)))
-    .withColumn("symbol", udfFn('value))
-    .withColumnRenamed("value", "e_id")
-    .withColumnRenamed("timestamp", "empTime")
+    .withColumn("quoteSym", udfFn('value))
+    .withColumnRenamed("value", "quotePrice")
+    .withColumnRenamed("timestamp", "quoteTime")
+    .withWatermark("quoteTime","5 seconds")
 
-  val departmentDS = rateData.where("value % 10 == 0")
-    .withColumn("dept", concat(lit("dept"),floor(rateData.col("value")/10)))
+  var orderDs = rateData.where("value % 10 >= 5")
+    .withColumn("orderId", concat(lit("id"),floor(rateData.col("value")/10)))
    // .withColumn("d_deptId", lit(floor(rateData.col("value")/10)))
-    .withColumnRenamed("timestamp","deptTime")
-    .withColumn("symbol", udfFn('value))
-    .withColumnRenamed("value", "d_id")
+    .withColumnRenamed("timestamp","orderTime")
+    .withColumn("orderSym", udfFn('value))
+    .withColumnRenamed("value", "orderPrice")
+    .withWatermark("orderTime","5 seconds")
 
-
-  val joinedDS =  departmentDS.join(employeeDS,"symbol")
-
-  val joinedStream = joinedDS.select('symbol,'e_id,'d_id,'empTime, 'deptTime,'firstName) //,'lastName, 'e_deptId,'d_deptId)
+  val joinedDS =  orderDs.join(quoteDs,expr("""orderSym = quoteSym and orderTime >= quoteTime and orderTime <= quoteTime + interval 10 seconds"""), joinType = "leftOuter")
+  //,'lastName, 'e_deptId,'d_deptId)
+  val joinedStream = joinedDS.select('orderId,'orderSym,'quotePrice,'orderPrice,'orderTime, 'quoteTime)
+    .groupBy("orderId", "orderSym")
+    .agg(last("quoteTime").as("qteTime"))
+    .select('orderId,'orderSym,'qteTime) //'quotePrice,'orderPrice,'orderTime,
     .writeStream
     .format("console")
     .option("truncate", false)
+    .outputMode("Update")
     .option("checkpointLocation", chkPt)
     .trigger(Trigger.ProcessingTime("2 seconds"))
     .start()

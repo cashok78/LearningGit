@@ -1,42 +1,30 @@
 package streaming.join
 
-import java.sql.Timestamp
+import java.util
 import java.util.UUID
 
-import entity.RateData
+import entity.{Order, Quote}
 import org.apache.log4j.{Level, LogManager}
-import org.apache.spark.sql.SparkSession
+import org.apache.spark.examples.sql.streaming.{SessionInfo, SessionUpdate}
+import org.apache.spark.sql
+import org.apache.spark.sql.streaming.{GroupState, GroupStateTimeout, OutputMode, Trigger}
+import org.apache.spark.sql.{Encoders, SparkSession}
+import org.apache.spark.sql.types.StructType
 import org.apache.spark.sql.functions._
-import org.apache.spark.sql.streaming.Trigger
-import org.apache.spark.sql.types.{StringType, StructType, TimestampType}
+
+import scala.collection.mutable.ArrayBuffer
 
 object streamingFileJoin extends App {
 
-  def getOrderSchema(): StructType={
-    StructType(
-        StructField("orderId", StringType),
-        StructField("orderSymbol", StringType),
-        StructField("price", Double),
-        StructField("quantity", Long),
-        StructField("orderTime", TimestampType))
+  def readFileStream(spark:SparkSession, fileSrc:String, schema:StructType):sql.DataFrame = {
+     spark.readStream.option("header", "true").schema(schema).option("maxFilesPerTrigger", 1).csv(fileSrc)
   }
 
-  def getQuoteSchema(): StructType={
-      new StructType().add("quoteSymbol", "string").add("bid", "double").add("ask", "double").add("quantity", "long").add("quoteTime", "timestamp")
-  }
+  override def main(args: Array[String]): Unit = {
 
-
-  def readFileStream(fileSrc:String, schema:StructType):sql.DataFrame{
-    val fileStreamDf = sparkSession.readStream
-    .option("header", "true")
-    .schema(schema)
-    .csv(fileSrc)
-  }
-
-  def main(args: Array[String]): Unit = {
     val chkPt = "C://temp//" + UUID.randomUUID.toString
     val spark: SparkSession = SparkSession.builder()
-      .appName("streamStreamInnerJoin")
+      .appName("streamingFileJoin")
       .master("local[*]")
       .getOrCreate()
 
@@ -44,53 +32,48 @@ object streamingFileJoin extends App {
 
     val logger = LogManager.getRootLogger
     logger.setLevel(Level.ERROR)
+    val orderSchema = Encoders.product[Order].schema
+    val quoteSchema = Encoders.product[Quote].schema
 
-    val df = spark.readStream
-      .format("rate")
-      .option("rowsPerSecond", 3)
-      .option("numPartitions", 1)
-      .option("rampUpTime", 1)
-      .option("includeTimestamp", value = true)
-      .load()
-
+    orderSchema.printTreeString()
+    quoteSchema.printTreeString()
     import spark.implicits._
 
-    val tickers = Seq("0011.HK","0000.HK","0055.HK","2111.HK","2323.HK","1167.HK","0700.HK")
-    val udfFn = udf{value:Int => tickers(value %7)}
-    val rateData = df.as[RateData]
-    var quoteDs = rateData.where("value % 10 < 5")
-      .withColumn("quoteType",  concat(lit("quoteType "),rateData.col("value")))
-      //.withColumn("lastName",  concat(lit("lastName"),rateData.col("value")))
-      //.withColumn("e_deptId", lit(floor(rateData.col("value")/10)))
-      .withColumn("quoteSym", udfFn('value))
-      .withColumnRenamed("value", "quotePrice")
-      .withColumnRenamed("timestamp", "quoteTime")
-      .withWatermark("quoteTime","5 seconds")
+    val quoteStream = readFileStream(spark, "E:\\Java\\HugeDatasets\\csv\\quotes", quoteSchema).withWatermark("quoteTime", "2 seconds")
+    val orderStream = readFileStream(spark, "E:\\Java\\HugeDatasets\\csv\\orders", orderSchema).withWatermark("orderTime", "2 seconds")
+    quoteStream.as[Quote].groupByKey(_.quoteSymbol).flatMapGroupsWithState(OutputMode.Append, GroupStateTimeout.NoTimeout())(flatMapForQuotes)
 
-    var orderDs = rateData.where("value % 10 >= 5")
-      .withColumn("orderId", concat(lit("id"),floor(rateData.col("value")/10)))
-      // .withColumn("d_deptId", lit(floor(rateData.col("value")/10)))
-      .withColumnRenamed("timestamp","orderTime")
-      .withColumn("orderSym", udfFn('value))
-      .withColumnRenamed("value", "orderPrice")
-      .withWatermark("orderTime","5 seconds")
-
-    val joinedDS =  orderDs.join(quoteDs,expr("""orderSym = quoteSym and orderTime >= quoteTime and orderTime <= quoteTime + interval 10 seconds"""), joinType = "leftOuter")
-    //,'lastName, 'e_deptId,'d_deptId)
-    val joinedStream = joinedDS.select('orderId,'orderSym,'quotePrice,'orderPrice,'orderTime, 'quoteTime)
-      .groupBy("orderId", "orderSym")
-      .agg(last("quoteTime").as("qteTime"))
-      .select('orderId,'orderSym,'qteTime) //'quotePrice,'orderPrice,'orderTime,
-      .writeStream
-      .format("console")
-      .option("truncate", false)
-      .outputMode("Update")
-      .option("checkpointLocation", chkPt)
-      .trigger(Trigger.ProcessingTime("2 seconds"))
-      .start()
-
-    //   .queryName("joinedTable")
+    /*
+    orderStream.join(quoteStream,expr("""quoteSymbol = orderSymbol and quoteTime <= orderTime and orderTime <= quoteTime + interval 2 seconds"""), joinType =  "leftOuter")
+        .groupBy("orderId")
+        .agg(last("orderSymbol").as("symbol"), last("quoteTime").as("quoteTime"), last("ask").as("ask"),last("bid").as("bid"))
+        .writeStream
+        .trigger(Trigger.ProcessingTime("2 seconds"))
+        .format("console")
+        .outputMode("update")
+        .start()
+*/
+       //orderStream.writeStream      .format("console")      .outputMode("update")      .start()
     spark.streams.awaitAnyTermination()
+
+
+
   }
 
+  def flatMapForQuotes(symbol:String, quotes:Iterator[Quote],state:GroupState[Quote]): Iterator[Quote]={
+    var quotesForSym = ArrayBuffer[Quote]();
+
+    if(quotes != null && quotes.hasNext) {
+      val finalQuote = quotes.maxBy(_.quoteTime)
+      state.update(finalQuote)
+      quotes.foreach(qte => quotesForSym+=qte)
+    }
+    else
+      if(state.get != null)
+        sys.error(s" $symbol is neither present in State nor available in current batch")
+      else
+        quotesForSym += state.get
+
+      quotesForSym.toIterator
+    }
 }
